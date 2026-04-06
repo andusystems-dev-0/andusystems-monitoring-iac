@@ -1,0 +1,6 @@
+- name: main | install Homepage 
+  import_tasks: install.yml
+  tags: 
+    - homepage
+    - apps
+    - install

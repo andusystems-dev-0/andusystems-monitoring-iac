@@ -1,0 +1,27 @@
+---
+- name: Create loki namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: loki
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Create Loki MinIO credentials secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: loki-minio-credentials
+        namespace: loki
+      type: Opaque
+      stringData:
+        rootUser: "{{ minio_root_user }}"
+        rootPassword: "{{ minio_root_password }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"

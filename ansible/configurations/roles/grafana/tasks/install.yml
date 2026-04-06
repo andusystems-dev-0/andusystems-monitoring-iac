@@ -1,0 +1,48 @@
+- name: Create Grafana namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: grafana
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Create Grafana admin secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: grafana-admin-secret
+        namespace: grafana
+      type: Opaque
+      stringData:
+        admin-user: "{{ grafana_admin_user }}"
+        admin-password: "{{ grafana_admin_password }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Create Grafana OIDC secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: grafana-oidc-secret
+        namespace: grafana
+      type: Opaque
+      stringData:
+        GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: "{{ grafana_oidc_client_secret }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Apply Grafana Manifest
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', repo_root + '/apps/grafana/manifest.yml') | from_yaml_all | list }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"

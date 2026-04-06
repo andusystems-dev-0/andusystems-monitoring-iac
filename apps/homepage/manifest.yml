@@ -1,0 +1,63 @@
+# monitoring/apps/homepage/ingressroute.yml
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: homepage-ingressroute
+  namespace: homepage
+spec:
+  entryPoints:
+    - websecure                       # HTTPS only
+  routes:
+    - match: Host(`homepage.andusystems.com`) && PathPrefix(`/`) #TODO: Change this before open sourcing #Change this before open sourcing #Change this before open sourcing #Change this before open sourcing 
+      kind: Rule
+      services:
+        - name: monitoring-homepage
+          port: 80
+          namespace: homepage
+  tls:
+    secretName: homepage-tls          # references the Certificate secret above
+---
+# Redirect HTTP to HTTPS
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: homepage-ingressroute-http
+  namespace: homepage
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`homepage.andusystems.com`) && PathPrefix(`/`) #TODO: Change this before open sourcing #Change this before open sourcing #Change this before open sourcing #Change this before open sourcing 
+      kind: Rule
+      middlewares:
+        - name: redirect-to-https
+          namespace: homepage
+      services:
+        - name: monitoring-homepage
+          port: 80
+          namespace: homepage
+---
+# Middleware to handle the HTTP->HTTPS redirect
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: homepage
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: homepage-tls
+  namespace: homepage
+spec:
+  secretName: homepage-tls          # Traefik will reference this secret
+  # Use staging first — switch to letsencrypt-prod once confirmed working
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - homepage.andusystems.com #TODO: Change this before open sourcing #Change this before open sourcing #Change this before open sourcing #Change this before open sourcing #Change this before open sourcing 

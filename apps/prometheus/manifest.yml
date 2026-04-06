@@ -1,0 +1,90 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prometheus-ingressroute
+  namespace: prometheus
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`prometheus.andusystems.com`) && PathPrefix(`/`)"
+      kind: Rule
+      services:
+        - name: monitoring-kube-prometheus-prometheus
+          port: 9090
+          namespace: prometheus
+  tls:
+    secretName: prometheus-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: alertmanager-ingressroute
+  namespace: prometheus
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`alertmanager.andusystems.com`) && PathPrefix(`/`)"
+      kind: Rule
+      services:
+        - name: monitoring-kube-prometheus-alertmanager
+          port: 9093
+          namespace: prometheus
+  tls:
+    secretName: alertmanager-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: prometheus-ingressroute-http
+  namespace: prometheus
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`prometheus.andusystems.com`) && PathPrefix(`/`)"
+      kind: Rule
+      middlewares:
+        - name: redirect-to-https
+          namespace: prometheus
+      services:
+        - name: monitoring-kube-prometheus-prometheus
+          port: 9090
+          namespace: prometheus
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: prometheus
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: prometheus-tls
+  namespace: prometheus
+spec:
+  secretName: prometheus-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - prometheus.andusystems.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: alertmanager-tls
+  namespace: prometheus
+spec:
+  secretName: alertmanager-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - alertmanager.andusystems.com

@@ -1,0 +1,11 @@
+- name: Install Homepage
+  gather_facts: true
+  hosts: localhost
+  tasks:
+
+    - include_role:
+        name: homepage
+      tags: 
+        - homepage
+        - apps
+        - install

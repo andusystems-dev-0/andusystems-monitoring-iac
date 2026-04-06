@@ -1,0 +1,154 @@
+# values.yaml
+#<REMOVED BY SENTINEL BOT: API_KEY — API key or token detected>cer
+service:
+  main:
+    enabled: true
+    type: ClusterIP
+    ports:
+      http:
+        port: 80
+        targetPort: 3000
+
+# Disable ingress since we're using ClusterIP
+ingress:
+  main:
+    enabled: false  # Disable ingress
+
+# Controller configuration (unchanged)
+controller:
+  strategy: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 25%
+
+# RBAC (unchanged)
+enableRbac: false
+
+serviceAccount:
+  create: false
+  name: ""
+
+# Persistence (unchanged)
+persistence:
+  logs:
+    enabled: true
+    type: emptyDir
+    mountPath: /app/config/logs
+
+# values.yml - inline config directly in Helm values
+config:
+  settings:
+    title: Andu Systems
+    theme: dark
+    color: slate
+    headerStyle: clean
+    layout:
+      Infrastructure:
+        style: row
+        columns: 3
+        header: true
+      Networking:
+        style: row
+        columns: 3
+        header: true
+      Security:
+        style: row
+        columns: 2
+        header: true
+      Monitoring & Observability:
+        style: row
+        columns: 3
+        header: true
+      CI/CD & Deployment:
+        style: row
+        columns: 2
+        header: true
+    target: _blank # open links in new tab
+
+  widgets:
+    - logo:
+        icon: https://cdn-icons-png.flaticon.com/512/2621/2621265.png
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: long
+          hour12: true
+    - openmeteo:
+        label: Local Weather
+        units: imperial
+        cache: 5
+
+  services:
+    - Infrastructure:
+        - Proxmox Cluster:
+            href: https://10.238.0.101:8006/
+            icon: proxmox.png
+            description: Hypervisor management
+            widget:
+              type: proxmox
+              url: https://10.238.0.101:8006/
+              username: "terraform@pam!terraform"
+              password: "fa19f9d6-be8f-4e15-b9f3-8bd3b489e1fc"
+        - Proxmox Backup Server:
+            href: https://10.238.0.106:8007/
+            icon: proxmox.png
+            description: VM & container backups
+        - Omada Controller:
+            href: https://10.238.0.2:8043/
+            icon: tp-link.png
+            description: Network management
+
+    - Networking:
+        - Cloudflare:
+            href: https://dash.cloudflare.com/75ecd0edc7a55f49b3878620c8a986fd/andusystems.com/dns/records
+            icon: cloudflare.png
+            description: DNS & CDN management
+        - Pi-hole DNS:
+            href: https://pihole.andusystems.com/admin/login
+            icon: pi-hole.png
+            description: DNS ad-blocking
+        - Pangolin:
+            href: https://pangolin.andusystems.com/andusystems/settings/resources/client
+            icon: pangolin.png
+            description: Tunnel & reverse proxy
+        
+    - Security:
+        - Keycloak:
+            href: https://keycloak.andusystems.com/admin/master/console/
+            icon: keycloak.png
+            description: Identity & SSO
+
+    - Monitoring & Observability:
+        - Grafana:
+            href: https://grafana.andusystems.com/login
+            icon: grafana.png
+            description: Dashboards & metrics
+
+    - CI/CD & Deployment:
+        - Forgejo:
+            href: https://forgejo.andusystems.com/
+            icon: forgejo.png
+            description: GitOps CI
+        - ArgoCD:
+            href: https://argocd.andusystems.com/applications
+            icon: argo-cd.png
+            description: GitOps CD
+
+  bookmarks:
+    - Developer:
+        - GitHub - VLAN 10 - Management Repo:
+            - href: https://github.com/dts-dev-0/andusystems-management
+              icon: github.png
+        - GitHub - VLAN 30 - Networking:
+            - href: https://github.com/dts-dev-0/andusystems-networking
+              icon: github.png
+        - GitHub - VLAN 40 - Storage Repo:
+            - href: https://github.com/dts-dev-0/andusystems-storage
+              icon: github.png
+        - GitHub - VLAN 50 - Monitoring Repo:
+            - href: https://github.com/dts-dev-0/andusystems-monitoring
+              icon: github.png
+        - GitHub - VLAN 60 - FleetDock:
+            - href: https://github.com/dts-dev-0/andusystems-fleetdock
+              icon: github.png

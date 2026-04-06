@@ -1,0 +1,11 @@
+- name: Install Grafana
+  gather_facts: true
+  hosts: localhost
+  tasks:
+
+    - include_role:
+        name: grafana
+      tags: 
+        - grafana
+        - apps
+        - install
