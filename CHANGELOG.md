@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Project documentation (README, architecture, development guide, changelog)
+
 ### Fixed
 - Bumped Alloy resource limits to resolve OOMKilled pod restarts
 

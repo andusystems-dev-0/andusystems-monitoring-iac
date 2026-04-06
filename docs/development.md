@@ -45,15 +45,23 @@ Edit `vault.yml` and fill in all required values (see [Configuration Reference](
 ansible-vault encrypt ansible/inventory/monitoring/group_vars/all/vault.yml
 ```
 
+To edit the vault later:
+
+```bash
+ansible-vault edit ansible/inventory/monitoring/group_vars/all/vault.yml
+```
+
 ### 4. Configure Terraform Variables
 
-Populate the Terraform variables file at `terraform/terraform.tfvars` with values matching your Proxmox environment.
+Populate the Terraform variables file at `terraform/terraform.tfvars` with values matching your Proxmox environment (API endpoint, node name, storage, networking).
 
 ### 5. SSH Key Setup
 
 Ensure the SSH key specified in vault variable `ssh_key_path` exists and has access to the target VMs (or will be distributed during VM provisioning).
 
 ## Deployment Commands
+
+All commands are run from the `ansible/` directory with the monitoring inventory.
 
 ### Full Stack Deployment
 
@@ -76,9 +84,9 @@ ansible-playbook configurations/apps.yml \
   --ask-vault-pass
 ```
 
-### Individual Roles
+### Individual Components
 
-Deploy specific components using Ansible tags or by running individual playbooks:
+Deploy specific components using standalone playbooks:
 
 ```bash
 # Cert-Manager only
@@ -95,7 +103,14 @@ ansible-playbook configurations/grafana.yml \
 ansible-playbook configurations/homepage.yml \
   -i inventory/monitoring/hosts.yml \
   --ask-vault-pass
+
+# Pangolin-Newt VPN only
+ansible-playbook configurations/pangolin-newt.yml \
+  -i inventory/monitoring/hosts.yml \
+  --ask-vault-pass
 ```
+
+Components without standalone playbooks (Prometheus, Loki, Tempo, Alloy, MetalLB) are deployed via `apps.yml` or the full `monitoring.yml` playbook.
 
 ## Project Structure
 
@@ -152,12 +167,35 @@ Ansible Vault handles all secrets. No environment variables need to be set for s
 
 1. Create `apps/<new-app>/values.yml` (and optionally `manifest.yml`)
 2. Create an Ansible role under `ansible/configurations/roles/<new-app>/`
-3. Add the role to `ansible/configurations/apps.yml` in the correct position
+3. Add the role to `ansible/configurations/apps.yml` in the correct deployment order
 4. Add any required vault variables to `ansible/inventory/monitoring/group_vars/all/vars.yml`
+5. Update the vault example with placeholder values
 
 ### Modifying Kubernetes Manifests
 
 Manifests in `apps/<app>/manifest.yml` are applied via the `kubernetes.core.k8s` Ansible module. Edit the manifest and re-run the playbook to apply changes.
+
+## Verification Commands
+
+After deployment, verify the cluster state:
+
+```bash
+# Check all pods are running
+kubectl get pods -A
+
+# Verify Prometheus is scraping targets
+kubectl port-forward -n prometheus svc/monitoring-kube-prometheus-prometheus 9090
+# Then visit http://localhost:9090/targets
+
+# Verify Loki is receiving logs
+kubectl logs -n loki -l app.kubernetes.io/name=loki --tail=20
+
+# Verify Alloy DaemonSets are running on all nodes
+kubectl get daemonsets -A | grep alloy
+
+# Check certificate status
+kubectl get certificates -A
+```
 
 ## Utility Scripts
 
@@ -174,7 +212,7 @@ Helper scripts are available in the `scripts/` directory:
 
 ### Alloy OOMKilled
 
-If Alloy pods are repeatedly killed due to memory limits, increase the resource limits in `apps/alloy/values.yml` for the affected sub-chart (`alloy-metrics`, `alloy-logs`, `alloy-singleton`, or `alloy-receiver`).
+If Alloy pods are repeatedly killed due to memory limits, increase the resource limits in `apps/alloy/values.yml` for the affected sub-chart (`alloy-metrics`, `alloy-logs`, `alloy-singleton`, or `alloy-receiver`). The metrics DaemonSet is the most resource-intensive component.
 
 ### Cert-Manager CRD Readiness
 
@@ -191,3 +229,19 @@ Grafana uses Keycloak OIDC for authentication. If login fails, verify:
 - The OIDC client secret matches the Keycloak configuration
 - The Keycloak realm and client are properly configured
 - Grafana's root URL matches the external ingress URL
+- The `grafana-oidc-secret` Kubernetes secret exists and has the correct value
+
+### Loki Not Receiving Logs
+
+If logs are not appearing in Grafana:
+- Check that Alloy logs DaemonSet pods are running on all nodes: `kubectl get ds -n alloy`
+- Verify Loki is healthy: `kubectl get pods -n loki`
+- Check Alloy logs for push errors: `kubectl logs -n alloy -l app.kubernetes.io/name=alloy-logs --tail=50`
+- Ensure the MinIO S3 endpoint is accessible from the monitoring cluster
+
+### MetalLB Not Assigning IPs
+
+If services remain in `Pending` state:
+- Verify the IPAddressPool resource exists: `kubectl get ipaddresspools -A`
+- Verify the L2Advertisement resource exists: `kubectl get l2advertisements -A`
+- Ensure the configured IP range does not conflict with other allocations on the network
