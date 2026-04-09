@@ -2,17 +2,16 @@
 
 ## Prerequisites
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Ansible | 2.9+ | Playbook execution |
-| Terraform | 1.x | Infrastructure provisioning |
-| kubectl | matching cluster version | Kubernetes management |
-| kubeadm | matching cluster version | Cluster bootstrapping |
-| Helm | 3.x | Chart management |
-| Python | 3.8+ | Ansible runtime |
-| SSH client | any | VM access |
+| Tool | Purpose | Install |
+|---|---|---|
+| **Ansible** | Orchestration and configuration management | [docs.ansible.com](https://docs.ansible.com/ansible/latest/installation_guide/) |
+| **Terraform** | Infrastructure provisioning (Proxmox VMs, Helm releases) | [terraform.io](https://developer.hashicorp.com/terraform/install) |
+| **kubectl** | Kubernetes CLI | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
+| **Helm 3** | Kubernetes package manager | [helm.sh](https://helm.sh/docs/intro/install/) |
+| **SSH key pair** | Node access | `ssh-keygen` |
+| **Access to Proxmox** | VM hypervisor | Requires API token |
 
-## Initial Setup
+## Local Setup
 
 ### 1. Clone the Repository
 
@@ -21,227 +20,206 @@ git clone <repository-url>
 cd andusystems-monitoring
 ```
 
-### 2. Install Ansible Collections
+### 2. Install Ansible Dependencies
 
 ```bash
-cd ansible
-ansible-galaxy install -r requirements.yml
+ansible-galaxy collection install -r ansible/requirements.yml
 ```
 
-This installs the `kubernetes.core` collection required for Kubernetes resource management.
+This installs the `kubernetes.core` collection required for Kubernetes resource management from Ansible.
 
 ### 3. Configure Ansible Vault
 
-Create the vault file from the provided example:
-
 ```bash
 cp ansible/inventory/monitoring/group_vars/all/vault.example \
-   ansible/inventory/monitoring/group_vars/all/vault.yml
+   ansible/inventory/monitoring/group_vars/all/vault
 ```
 
-Edit `vault.yml` and fill in all required values (see [Configuration Reference](../README.md#configuration-reference)), then encrypt:
+Edit the vault file and populate all required secrets. Encrypt it with:
 
 ```bash
-ansible-vault encrypt ansible/inventory/monitoring/group_vars/all/vault.yml
+ansible-vault encrypt ansible/inventory/monitoring/group_vars/all/vault
 ```
 
-To edit the vault later:
+### 4. Verify Inventory
+
+Review `ansible/inventory/monitoring/hosts.yml` to ensure host definitions match your environment. The inventory defines controller and worker nodes with IP addresses sourced from vault variables.
+
+### 5. Fetch Kubeconfig
+
+After the cluster is provisioned, the kubeconfig is stored at the repository root. Set your context:
 
 ```bash
-ansible-vault edit ansible/inventory/monitoring/group_vars/all/vault.yml
+export KUBECONFIG=$(pwd)/kubeconfig
+kubectl get nodes
 ```
-
-### 4. Configure Terraform Variables
-
-Populate the Terraform variables file at `terraform/terraform.tfvars` with values matching your Proxmox environment (API endpoint, node name, storage, networking).
-
-### 5. SSH Key Setup
-
-Ensure the SSH key specified in vault variable `ssh_key_path` exists and has access to the target VMs (or will be distributed during VM provisioning).
-
-## Deployment Commands
-
-All commands are run from the `ansible/` directory with the monitoring inventory.
-
-### Full Stack Deployment
-
-Deploys everything from VMs to applications:
-
-```bash
-cd ansible
-ansible-playbook configurations/monitoring.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-```
-
-### Applications Only
-
-Deploys all applications on an existing Kubernetes cluster:
-
-```bash
-ansible-playbook configurations/apps.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-```
-
-### Individual Components
-
-Deploy specific components using standalone playbooks:
-
-```bash
-# Cert-Manager only
-ansible-playbook configurations/cert-manager.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-
-# Grafana only
-ansible-playbook configurations/grafana.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-
-# Homepage only
-ansible-playbook configurations/homepage.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-
-# Pangolin-Newt VPN only
-ansible-playbook configurations/pangolin-newt.yml \
-  -i inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-```
-
-Components without standalone playbooks (Prometheus, Loki, Tempo, Alloy, MetalLB) are deployed via `apps.yml` or the full `monitoring.yml` playbook.
-
-## Project Structure
-
-### Ansible Roles
-
-Each role follows a consistent structure:
-
-```
-ansible/configurations/roles/<role-name>/
-├── defaults/main.yml    # Default variables (usually empty, vault-driven)
-├── tasks/
-│   ├── main.yml         # Entry point (includes install.yml)
-│   └── install.yml      # Installation tasks
-```
-
-**Role wrapper playbooks** (e.g., `roles/kubernetes.yml`, `roles/metallb.yml`) set host targeting and include the role.
-
-### Application Configuration
-
-Each application has its configuration in the `apps/` directory:
-
-```
-apps/<app-name>/
-├── values.yml       # Helm chart values
-└── manifest.yml     # Additional K8s manifests (IngressRoutes, Secrets, Certificates)
-```
-
-- **`values.yml`** -- Helm values passed during chart installation
-- **`manifest.yml`** -- Raw Kubernetes manifests applied via `kubernetes.core.k8s` (IngressRoutes, ClusterIssuers, Secrets, etc.)
-
-### Terraform Layers
-
-```
-terraform/layers/
-├── layer-1-infrastructure/   # Proxmox VM provisioning
-└── layer-2-helmapps/         # Helm chart deployment via Terraform
-```
-
-Layer 1 is called by the `vms` Ansible role; Layer 2 is called by the `metallb` role.
 
 ## Environment Variables
 
-Ansible Vault handles all secrets. No environment variables need to be set for standard deployment. The Ansible configuration at `ansible/ansible.cfg` disables host key checking and logs output to `ansible.log`.
+All sensitive configuration is managed through Ansible Vault. The following variables must be defined:
 
-## Modifying Applications
+### SSH & Node Access
 
-### Updating Helm Values
+| Variable | Description |
+|---|---|
+| `ssh_user` | SSH username for cluster nodes |
+| `ssh_key_path` | Path to SSH private key |
 
-1. Edit the relevant `apps/<app>/values.yml`
-2. Re-run the corresponding Ansible playbook or role
-3. The role will apply the updated values via Helm
+### Kubernetes
 
-### Adding a New Application
+| Variable | Description |
+|---|---|
+| `kubernetes_version` | Target Kubernetes version for kubeadm |
+| `pod_network_cidr` | CIDR for Flannel pod networking |
 
-1. Create `apps/<new-app>/values.yml` (and optionally `manifest.yml`)
-2. Create an Ansible role under `ansible/configurations/roles/<new-app>/`
-3. Add the role to `ansible/configurations/apps.yml` in the correct deployment order
-4. Add any required vault variables to `ansible/inventory/monitoring/group_vars/all/vars.yml`
-5. Update the vault example with placeholder values
+### Infrastructure
 
-### Modifying Kubernetes Manifests
+| Variable | Description |
+|---|---|
+| `proxmox_api_token_id` | Proxmox API token ID |
+| `proxmox_api_token_secret` | Proxmox API token secret |
+| `control_plane_ip` | IP address for the control plane node |
+| `worker_ips` | List of worker node IP addresses |
+| `metallb_ip_range` | IP range for MetalLB load balancer pool |
 
-Manifests in `apps/<app>/manifest.yml` are applied via the `kubernetes.core.k8s` Ansible module. Edit the manifest and re-run the playbook to apply changes.
+### TLS / DNS
 
-## Verification Commands
+| Variable | Description |
+|---|---|
+| `cloudflare_api_token` | CloudFlare API token for DNS-01 challenges |
+| `letsencrypt_email` | Email for Let's Encrypt certificate registration |
 
-After deployment, verify the cluster state:
+### Observability Stack
+
+| Variable | Description |
+|---|---|
+| `grafana_admin_user` | Grafana admin username |
+| `grafana_admin_password` | Grafana admin password |
+| `grafana_oidc_client_secret` | Keycloak OIDC client secret for Grafana |
+| `minio_root_user` | MinIO access key (S3 backend for Loki/Tempo) |
+| `minio_root_password` | MinIO secret key |
+
+### Tunnel
+
+| Variable | Description |
+|---|---|
+| `pangolin_endpoint` | Pangolin Newt endpoint |
+| `pangolin_id` | Pangolin Newt client ID |
+| `pangolin_secret` | Pangolin Newt client secret |
+
+## Deployment Commands
+
+### Full Stack Deployment
+
+Provisions VMs, bootstraps Kubernetes, and deploys all applications:
 
 ```bash
-# Check all pods are running
-kubectl get pods -A
-
-# Verify Prometheus is scraping targets
-kubectl port-forward -n prometheus svc/monitoring-kube-prometheus-prometheus 9090
-# Then visit http://localhost:9090/targets
-
-# Verify Loki is receiving logs
-kubectl logs -n loki -l app.kubernetes.io/name=loki --tail=20
-
-# Verify Alloy DaemonSets are running on all nodes
-kubectl get daemonsets -A | grep alloy
-
-# Check certificate status
-kubectl get certificates -A
+ansible-playbook ansible/configurations/monitoring.yml \
+  -i ansible/inventory/monitoring/hosts.yml \
+  --ask-vault-pass
 ```
 
-## Utility Scripts
+### Application-Only Deployment
 
-Helper scripts are available in the `scripts/` directory:
+Deploys all Helm applications (assumes cluster is already running):
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/vms.sh` | VM provisioning operations |
-| `scripts/kubernetes.sh` | Kubernetes cluster operations |
-| `scripts/apps.sh` | Application deployment |
-| `scripts/redeploy.sh` | Full redeployment automation |
+```bash
+ansible-playbook ansible/configurations/apps.yml \
+  -i ansible/inventory/monitoring/hosts.yml \
+  --ask-vault-pass
+```
+
+### Individual Component Deployment
+
+Each component can be deployed independently:
+
+```bash
+# Cert-Manager
+ansible-playbook ansible/configurations/cert-manager.yml \
+  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
+
+# Grafana
+ansible-playbook ansible/configurations/grafana.yml \
+  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
+
+# Homepage
+ansible-playbook ansible/configurations/homepage.yml \
+  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
+```
+
+For roles that are included in `apps.yml` but don't have standalone playbooks (e.g., Loki, Tempo, Alloy), use tags:
+
+```bash
+ansible-playbook ansible/configurations/apps.yml \
+  -i ansible/inventory/monitoring/hosts.yml \
+  --ask-vault-pass \
+  --tags apps
+```
+
+## Deployment Order
+
+Components must be deployed in this order (handled automatically by `monitoring.yml`):
+
+1. **VMs** — Proxmox VM provisioning via Terraform
+2. **Kubernetes** — kubeadm cluster bootstrap with Flannel CNI
+3. **MetalLB** — Load balancer (required by Traefik)
+4. **Cert-Manager** — TLS certificates (required by IngressRoutes)
+5. **Pangolin Newt** — Tunnel agent
+6. **Kube-Prometheus-Stack** — Prometheus, Alertmanager, CRDs
+7. **Loki** — Log aggregation
+8. **Tempo** — Distributed tracing
+9. **Alloy** — Unified telemetry collector
+10. **Homepage** — Dashboard portal
+11. **Grafana** — Visualization (depends on all datasource backends being available)
+
+## Modifying Helm Values
+
+Application Helm values are stored in `apps/<component>/values.yml`. After modifying values:
+
+1. Edit the values file
+2. Re-run the component's Ansible playbook or the full `apps.yml` playbook
+3. Terraform will detect the change and update the Helm release
+
+### Key Files to Edit
+
+| What to Change | File |
+|---|---|
+| Alloy collector config, destinations, resource limits | `apps/alloy/values.yml` |
+| Cert-Manager replicas, DNS resolvers | `apps/cert-manager/values.yml` |
+| Grafana datasources, OIDC config, dashboards | `apps/grafana/values.yml` |
+| Homepage layout, services, bookmarks | `apps/homepage/values.yml` |
+| Loki retention, storage, ingestion limits | `apps/loki/values.yml` |
+| Longhorn replica count, storage settings | `apps/longhorn/manifest.yml` |
+| Prometheus retention, storage, scrape config | `apps/prometheus/values.yml` (via Terraform) |
+| Tempo storage, OTLP receivers | `apps/tempo/values.yml` (via Terraform) |
+
+## Adding a New Monitored Cluster
+
+To add a new remote cluster's observability data to Grafana:
+
+1. Deploy the LGTM stack on the remote cluster
+2. Ensure the remote Prometheus, Loki, and Tempo endpoints are reachable from the monitoring cluster
+3. Add new datasource entries in `apps/grafana/values.yml` under the `datasources` section
+4. Re-deploy Grafana
+
+## Ansible Configuration
+
+The Ansible configuration (`ansible/ansible.cfg`) is set up for this project's inventory structure. Key settings:
+
+- Inventory path: `ansible/inventory/monitoring/hosts.yml`
+- Vault file: `ansible/inventory/monitoring/group_vars/all/vault`
+- SSH configuration: retry interval and connection timeout defined in vault variables
 
 ## Troubleshooting
 
-### Alloy OOMKilled
+### Common Issues
 
-If Alloy pods are repeatedly killed due to memory limits, increase the resource limits in `apps/alloy/values.yml` for the affected sub-chart (`alloy-metrics`, `alloy-logs`, `alloy-singleton`, or `alloy-receiver`). The metrics DaemonSet is the most resource-intensive component.
+**Terraform state conflicts**: The VMs and Helm roles run `terraform destroy` before `terraform apply`. If state is corrupted, manually clean up Terraform state files.
 
-### Cert-Manager CRD Readiness
+**Cert-Manager CRD race condition**: The kube-prometheus-stack and cert-manager roles wait for CRDs to be registered. If deployment fails with "CRD not found", re-run the playbook — CRD registration can take a few seconds.
 
-The Prometheus and cert-manager roles wait for CRDs to become available (up to 30 retries with 10-second delays). If deployment fails due to CRD timeouts, verify the CRD installation completed successfully:
+**Alloy OOMKilled**: If Alloy pods are evicted due to memory limits, increase resource limits in `apps/alloy/values.yml` under the relevant Alloy sub-component (`alloy-metrics`, `alloy-logs`, `alloy-singleton`, `alloy-receiver`).
 
-```bash
-kubectl get crds | grep cert-manager
-kubectl get crds | grep monitoring.coreos.com
-```
+**Grafana OIDC login issues**: Ensure the Keycloak realm and client are configured correctly. The `grafana_oidc_client_secret` in vault must match the Keycloak client secret. Check `apps/grafana/values.yml` for the OAuth configuration.
 
-### Grafana Login Issues
-
-Grafana uses Keycloak OIDC for authentication. If login fails, verify:
-- The OIDC client secret matches the Keycloak configuration
-- The Keycloak realm and client are properly configured
-- Grafana's root URL matches the external ingress URL
-- The `grafana-oidc-secret` Kubernetes secret exists and has the correct value
-
-### Loki Not Receiving Logs
-
-If logs are not appearing in Grafana:
-- Check that Alloy logs DaemonSet pods are running on all nodes: `kubectl get ds -n alloy`
-- Verify Loki is healthy: `kubectl get pods -n loki`
-- Check Alloy logs for push errors: `kubectl logs -n alloy -l app.kubernetes.io/name=alloy-logs --tail=50`
-- Ensure the MinIO S3 endpoint is accessible from the monitoring cluster
-
-### MetalLB Not Assigning IPs
-
-If services remain in `Pending` state:
-- Verify the IPAddressPool resource exists: `kubectl get ipaddresspools -A`
-- Verify the L2Advertisement resource exists: `kubectl get l2advertisements -A`
-- Ensure the configured IP range does not conflict with other allocations on the network
+**Worker node join failures**: The Kubernetes role retries worker joins with `--ignore-preflight-errors`. If a node still fails to join, SSH into the node and check `journalctl -u kubelet` for details.
