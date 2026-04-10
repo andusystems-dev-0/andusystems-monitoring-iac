@@ -2,223 +2,256 @@
 
 ## Overview
 
-The andusystems-monitoring repository manages a dedicated monitoring cluster that serves as the centralized observability platform for a multi-cluster homelab environment. The cluster runs on bare-metal Proxmox VMs and hosts a full LGTM stack (Loki, Grafana, Tempo, Prometheus) alongside supporting infrastructure.
+The monitoring cluster is a dedicated Kubernetes cluster that serves as the **centralized observability hub** for the entire andusystems homelab. It collects and visualizes metrics, logs, and traces from all clusters in the environment using the Prometheus + Loki + Tempo + Grafana (LGTM) stack.
+
+## Infrastructure Layers
+
+The cluster is provisioned and configured through three distinct layers:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Layer 3: Applications                 │
+│  Prometheus · Loki · Tempo · Alloy · Grafana · Homepage │
+│  Traefik · Cert-Manager · MetalLB · Longhorn · Newt     │
+│              (Ansible + Helm charts)                     │
+├─────────────────────────────────────────────────────────┤
+│                   Layer 2: Kubernetes                    │
+│         Flannel CNI · kubeadm · containerd              │
+│                    (Ansible)                             │
+├─────────────────────────────────────────────────────────┤
+│                  Layer 1: Infrastructure                 │
+│         Proxmox VMs · Ubuntu cloud images               │
+│                   (Terraform)                            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Layer 1 — Infrastructure (Terraform)
+
+Terraform provisions virtual machines on Proxmox:
+
+- **Control plane**: Single node with higher CPU/memory allocation
+- **Workers**: Multiple worker nodes with larger disk allocations for storage
+- **Networking**: Each VM is assigned a static IP on the monitoring VLAN with a shared gateway
+- **OS**: Ubuntu cloud images bootstrapped via cloud-init with SSH key injection
+
+### Layer 2 — Kubernetes (Ansible)
+
+Ansible bootstraps a Kubernetes cluster using `kubeadm`:
+
+1. Installs containerd runtime with SystemdCgroup
+2. Installs `kubelet`, `kubeadm`, `kubectl` (version-pinned via vault)
+3. Configures kernel modules (`overlay`, `br_netfilter`) and sysctl for networking
+4. Initializes the control plane with a configured pod CIDR
+5. Deploys Flannel CNI for pod networking
+6. Joins worker nodes to the cluster
+
+### Layer 3 — Applications (Ansible + Helm)
+
+Applications are deployed via Ansible roles that apply Helm charts and Kubernetes manifests. The deployment order is:
+
+```
+MetalLB → Cert-Manager → Pangolin-Newt → Prometheus → Loki → Tempo → Alloy → Homepage → Grafana
+```
 
 ## Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Monitoring Cluster                               │
-│                                                                         │
-│  ┌─────────────┐     ┌──────────────────────────────────────────────┐  │
-│  │   Traefik    │     │           Observability Stack                │  │
-│  │  (Ingress)   │     │                                              │  │
-│  │             ─┼────►│  ┌────────────┐  ┌───────┐  ┌───────────┐  │  │
-│  │  TLS via     │     │  │ Prometheus  │  │ Loki  │  │   Tempo   │  │  │
-│  │  Cert-Manager│     │  │ (metrics)   │  │(logs) │  │ (traces)  │  │  │
-│  └─────────────┘     │  └─────▲──────┘  └───▲───┘  └─────▲─────┘  │  │
-│                       │        │             │             │         │  │
-│  ┌─────────────┐     │  ┌─────┴─────────────┴─────────────┴─────┐  │  │
-│  │   MetalLB    │     │  │              Grafana Alloy             │  │  │
-│  │   (L2 LB)   │     │  │  (unified collector: metrics,         │  │  │
-│  └─────────────┘     │  │   logs, traces + OTLP receiver)       │  │  │
-│                       │  └───────────────────────────────────────┘  │  │
-│  ┌─────────────┐     │                                              │  │
-│  │  Longhorn    │     │  ┌────────────────────────────────────────┐ │  │
-│  │ (storage)    │     │  │             Grafana                    │ │  │
-│  └─────────────┘     │  │  (dashboards, Keycloak SSO,            │ │  │
-│                       │  │   multi-cluster datasources)           │ │  │
-│  ┌─────────────┐     │  └────────────────────────────────────────┘ │  │
-│  │  Homepage    │     └──────────────────────────────────────────────┘  │
-│  │ (dashboard)  │                                                       │
-│  └─────────────┘     ┌───────────────┐                                 │
-│                       │ Pangolin Newt │                                 │
-│  ┌─────────────┐     │  (tunnel)     │                                 │
-│  │ Cert-Manager│     └───────────────┘                                 │
-│  │ (Let's      │                                                       │
-│  │  Encrypt)   │                                                       │
-│  └─────────────┘                                                       │
-└─────────────────────────────────────────────────────────────────────────┘
-          ▲                    ▲                    ▲
-          │                    │                    │
-    ┌─────┴──────┐   ┌────────┴───────┐   ┌───────┴────────┐
-    │  Remote     │   │  Remote        │   │  Remote        │
-    │  Cluster A  │   │  Cluster B     │   │  Cluster C ... │
-    │  (own LGTM) │   │  (own LGTM)   │   │  (own LGTM)   │
-    └────────────┘   └────────────────┘   └────────────────┘
+                        ┌──────────────────────────────────────────────┐
+                        │            External Access                    │
+                        │                                              │
+                        │   Browser ──► Traefik Ingress ──► Services   │
+                        │                    │                         │
+                        │          ┌─────────┼──────────┐              │
+                        │          ▼         ▼          ▼              │
+                        │      Grafana   Prometheus  Homepage          │
+                        │                                              │
+                        └──────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          Monitoring Cluster                                   │
+│                                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                    │
+│  │  Prometheus   │    │     Loki     │    │    Tempo     │                    │
+│  │              │    │              │    │              │                    │
+│  │ - Metrics    │    │ - Log ingest │    │ - Trace      │                    │
+│  │ - Alerting   │    │ - 30d retain │    │   ingest     │                    │
+│  │ - 15d retain │    │ - S3 backend │    │ - S3 backend │                    │
+│  │ - OTLP recv  │    │   (MinIO)    │    │   (MinIO)    │                    │
+│  └──────▲───────┘    └──────▲───────┘    └──────▲───────┘                    │
+│         │                   │                   │                            │
+│         └───────────────────┼───────────────────┘                            │
+│                             │                                                │
+│                    ┌────────┴────────┐                                        │
+│                    │     Alloy       │                                        │
+│                    │                 │                                        │
+│                    │ ┌─────────────┐ │                                        │
+│                    │ │ alloy-metrics│ │  Collects K8s and node metrics        │
+│                    │ ├─────────────┤ │                                        │
+│                    │ │ alloy-logs  │ │  Collects pod logs and events          │
+│                    │ ├─────────────┤ │                                        │
+│                    │ │ alloy-recv  │ │  OTLP receiver (gRPC + HTTP)          │
+│                    │ ├─────────────┤ │                                        │
+│                    │ │alloy-single │ │  Singleton tasks (cluster events)     │
+│                    │ └─────────────┘ │                                        │
+│                    └─────────────────┘                                        │
+│                                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                    │
+│  │   Grafana    │    │   Homepage   │    │ Pangolin-Newt│                    │
+│  │              │    │              │    │              │                    │
+│  │ - Dashboards │    │ - Service    │    │ - VPN tunnel │                    │
+│  │ - SSO (OIDC) │    │   directory  │    │   for admin  │                    │
+│  │ - Multi-     │    │ - Quick links│    │   access     │                    │
+│  │   cluster    │    │              │    │              │                    │
+│  │   datasource │    │              │    │              │                    │
+│  └──────────────┘    └──────────────┘    └──────────────┘                    │
+│                                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                    │
+│  │   Traefik    │    │  Cert-Manager│    │   MetalLB    │                    │
+│  │              │    │              │    │              │                    │
+│  │ - Ingress    │    │ - Let's      │    │ - L2 load    │                    │
+│  │ - TLS term   │    │   Encrypt    │    │   balancer   │                    │
+│  │ - HTTP→HTTPS │    │ - DNS-01     │    │ - IP pool    │                    │
+│  │   redirect   │    │   (CF)       │    │   mgmt       │                    │
+│  └──────────────┘    └──────────────┘    └──────────────┘                    │
+│                                                                              │
+│  ┌──────────────┐                                                            │
+│  │   Longhorn   │                                                            │
+│  │              │                                                            │
+│  │ - Block PVs  │                                                            │
+│  │ - 3 replicas │                                                            │
+│  └──────────────┘                                                            │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Data Flows
 
-### Telemetry Collection (Local)
-
-Grafana Alloy runs as the unified collector within the monitoring cluster, shipping data to three backends:
+### Metrics Flow
 
 ```
-Kubernetes Pods/Nodes
-        │
-        ▼
-  ┌───────────┐
-  │   Alloy   │──── metrics ──► Prometheus (remote write)
-  │           │──── logs    ──► Loki (push API)
-  │           │──── traces  ──► Tempo (OTLP gRPC)
-  └───────────┘
+Remote Clusters ──(Prometheus remote read)──► Grafana
+                                                 │
+Local cluster ──► Alloy (alloy-metrics) ──► Prometheus ──► Grafana
+                         │
+                    ┌────┴─────┐
+                    │ Sources: │
+                    │ - node   │
+                    │   exporter│
+                    │ - kube-  │
+                    │   state  │
+                    │ - pod    │
+                    │   annot. │
+                    └──────────┘
 ```
 
-Alloy collects:
-- **Cluster metrics** — node-level and Kubernetes API metrics (delegates to existing node-exporter and kube-state-metrics from kube-prometheus-stack)
-- **Pod logs** — aggregated from all namespaces
-- **Cluster events** — Kubernetes event stream
-- **Application traces** — via OTLP receiver (gRPC and HTTP)
-- **Annotation autodiscovery** — scrapes pods with `prometheus.io/*` annotations
-- **Prometheus Operator objects** — respects ServiceMonitor and PodMonitor CRDs
+- **Local metrics**: Alloy scrapes node-exporter, kube-state-metrics, and annotation-autodiscovered pods, then remote-writes to the local Prometheus instance.
+- **Cross-cluster metrics**: Grafana connects directly to Prometheus instances on each remote cluster as separate datasources. Each cluster runs its own Prometheus.
 
-### Multi-Cluster Observability
-
-Grafana is configured with datasources pointing to Prometheus, Loki, and Tempo instances running in each remote cluster. Each remote cluster runs its own observability stack; Grafana queries them directly over the network.
+### Logs Flow
 
 ```
-                    ┌──────────┐
-                    │ Grafana  │
-                    └────┬─────┘
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-   ┌────────────┐ ┌────────────┐ ┌────────────┐
-   │ Management │ │  Storage   │ │ FleetDock  │  ... (+ Networking, local)
-   │  Cluster   │ │  Cluster   │ │  Cluster   │
-   │ Prom/Loki/ │ │ Prom/Loki/ │ │ Prom/Loki/ │
-   │   Tempo    │ │   Tempo    │ │   Tempo    │
-   └────────────┘ └────────────┘ └────────────┘
+Remote Clusters ──(Loki remote read)──► Grafana
+                                           │
+Local pods ──► Alloy (alloy-logs) ──► Loki ──► Grafana
+                      │
+                 Pod logs +
+                 Cluster events
 ```
 
-This is a **pull-based federation** model — the central Grafana queries each cluster's observability endpoints on demand rather than having data pushed to a central store.
+- **Local logs**: Alloy collects pod logs and Kubernetes events, then pushes to the local Loki instance.
+- **Storage**: Loki stores chunks and indexes in MinIO (S3-compatible) on the storage cluster, with 30-day retention.
+- **Cross-cluster logs**: Grafana connects directly to Loki instances on each remote cluster.
 
-### TLS Certificate Flow
-
-```
-Cert-Manager ──► ACME (Let's Encrypt)
-     │                    │
-     │  DNS-01 challenge  │
-     ▼                    ▼
-CloudFlare DNS ◄──────────┘
-     │
-     ▼
-TLS Certificates ──► Traefik IngressRoutes
-```
-
-All public-facing services use TLS certificates issued by Let's Encrypt via DNS-01 validation against CloudFlare. Cert-Manager automates issuance and renewal.
-
-### Ingress Routing
+### Traces Flow
 
 ```
-External Request
-       │
-       ▼
-    MetalLB (Layer 2 advertisement)
-       │
-       ▼
-    Traefik (IngressRoute CRDs)
-       │
-       ├──► Grafana
-       ├──► Prometheus
-       ├──► Alertmanager
-       ├──► Loki
-       └──► Homepage
+Applications ──(OTLP gRPC/HTTP)──► Alloy (alloy-receiver) ──► Tempo
+                                                                  │
+                                                              Grafana
 ```
 
-Traefik uses IngressRoute custom resources (not standard Ingress) for routing. All routes enforce HTTPS with HTTP-to-HTTPS redirect middleware.
+- **Ingestion**: Alloy exposes OTLP receivers (gRPC and HTTP) for application-instrumented traces.
+- **Storage**: Tempo stores traces in MinIO on the storage cluster.
+- **Metrics generation**: Tempo generates service metrics and remote-writes them back to Prometheus.
+- **Cross-cluster traces**: Grafana connects to Tempo instances on each remote cluster.
+- **Correlation**: Grafana has `traceToMetrics`, `traceToLogs`, and `correlations` feature toggles enabled for navigating between signals.
 
-## Storage Architecture
-
-### Persistent Volumes
-
-**Longhorn** serves as the default StorageClass, providing distributed block storage with 3-way replication across worker nodes.
-
-Consumers:
-| Component | Volume Size | Purpose |
-|---|---|---|
-| Prometheus | 20Gi | Metric TSDB (15-day retention) |
-| Alertmanager | 2Gi | Alert state |
-| Loki | 10Gi | Write-ahead log and local cache |
-| Tempo | 10Gi | Write-ahead log and local cache |
-| Grafana | 5Gi | Dashboard definitions and settings |
-
-### Object Storage
-
-Loki and Tempo use an external MinIO instance (on a separate storage cluster) as their S3-compatible object store for long-term data:
-
-- **Loki** — stores log chunks and ruler data in dedicated S3 buckets (TSDB schema v13, 30-day retention)
-- **Tempo** — stores trace data in a dedicated S3 bucket
-
-## Infrastructure Provisioning
-
-Deployment follows a layered approach orchestrated by Ansible:
+### Ingress Flow
 
 ```
-Layer 0: Ansible Orchestration
-       │
-       ▼
-Layer 1: Terraform (Proxmox VMs)
-       │
-       ▼
-Layer 2: Kubernetes Bootstrap (kubeadm + Flannel)
-       │
-       ▼
-Layer 3: Terraform (Helm Chart Installation)
-       │
-       ▼
-Layer 4: Ansible (Kubernetes Manifests — secrets, CRDs, IngressRoutes)
+Internet ──► DNS (Cloudflare) ──► MetalLB VIP ──► Traefik ──► Services
+                                                      │
+                                               ┌──────┼──────┐
+                                               ▼      ▼      ▼
+                                           Grafana  Prom  Homepage
 ```
 
-1. **VM Provisioning** — Terraform creates VMs on Proxmox, Ansible configures SSH access
-2. **Kubernetes Bootstrap** — kubeadm initializes the control plane, Flannel provides pod networking, workers join the cluster
-3. **Helm Charts** — Terraform deploys Helm releases for all applications
-4. **Post-install Configuration** — Ansible applies Kubernetes manifests (secrets from vault, CRDs, IngressRoutes)
-
-## Cluster Topology
-
-The monitoring cluster consists of a control plane node and multiple worker nodes. Nodes are provisioned as Proxmox VMs on bare-metal servers with Intel Xeon processors.
-
-- **Control Plane**: Single node running the Kubernetes API server, scheduler, and controller manager
-- **Workers**: Multiple nodes running application workloads
-- **Networking**: Flannel CNI for pod networking, MetalLB for external service LoadBalancer IPs (Layer 2 mode)
+- **TLS**: Cert-Manager obtains Let's Encrypt certificates using DNS-01 challenges via the Cloudflare API.
+- **Routing**: Traefik IngressRoutes map hostnames to backend services with automatic HTTP-to-HTTPS redirection.
+- **Load balancing**: MetalLB advertises VIPs using L2 mode for external access.
 
 ## Key Design Decisions
 
-### Unified Collector (Alloy)
+### Centralized vs. Federated Monitoring
 
-Grafana Alloy replaces separate metric/log/trace collectors with a single agent. It handles Prometheus scraping, log shipping to Loki, and OTLP trace forwarding to Tempo — reducing operational overhead and providing a single configuration point.
+Grafana acts as the **single pane of glass** by connecting to individual Prometheus, Loki, and Tempo instances on each cluster. This avoids the complexity of federated Prometheus or cross-cluster Alloy pipelines while still providing unified visibility. Each cluster owns its own telemetry data; Grafana simply queries it.
 
-### Separate Grafana Deployment
+### Alloy Sub-Deployments
 
-Grafana is deployed independently rather than through the kube-prometheus-stack chart (`grafana.enabled: false`). This allows custom datasource configuration for multi-cluster federation and independent Keycloak OIDC integration.
+Alloy is split into four sub-deployments to separate concerns and resource allocation:
 
-### DNS-01 TLS Validation
+| Sub-deployment | Purpose | Scaling |
+|---|---|---|
+| `alloy-metrics` | Kubernetes and node metric scraping | DaemonSet-like |
+| `alloy-logs` | Pod log and event collection | DaemonSet-like |
+| `alloy-receiver` | OTLP ingestion endpoint | Replicated |
+| `alloy-singleton` | Cluster-wide singleton tasks | Single replica |
 
-Let's Encrypt certificates use DNS-01 challenges via CloudFlare rather than HTTP-01. This works behind firewalls/NAT without requiring inbound HTTP access to the cluster for certificate validation.
+### S3-Backed Storage for Loki and Tempo
 
-### Centralized SSO
+Both Loki and Tempo use MinIO (on the storage cluster) as their object storage backend. This separates compute from storage, allows independent scaling, and provides durability beyond the monitoring cluster's local disks.
 
-Grafana authenticates via Keycloak (generic OAuth), enabling centralized identity management. Role mapping (`admin`, `editor`, `viewer`) is derived from Keycloak realm roles.
+### Flannel CNI
 
-### Longhorn for Persistence
+The cluster uses Flannel for pod networking — a simple, well-understood CNI appropriate for the cluster's scale and requirements.
 
-Longhorn provides 3-way replicated block storage across worker nodes, ensuring data survives individual node failures. It serves as the default StorageClass for all stateful workloads.
+### Longhorn for Persistent Volumes
 
-### Infrastructure as Code
+Longhorn provides replicated block storage (3 replicas by default) for stateful workloads like Prometheus and Loki, with 200% over-provisioning allowance.
 
-The entire stack — from VMs to application configuration — is defined declaratively. Proxmox VMs are managed by Terraform, Kubernetes is bootstrapped by Ansible, and applications are deployed via Helm with Ansible orchestration. Sensitive values are stored in Ansible Vault.
+### SSO via Keycloak
 
-## Namespace Layout
+Grafana authenticates through Keycloak using OpenID Connect (OIDC), with role mapping for admin, editor, and viewer roles. This integrates with the centralized SSO system used across the environment.
 
-| Namespace | Components |
+## Resource Allocation
+
+| Component | CPU Request/Limit | Memory Request/Limit |
+|---|---|---|
+| Prometheus | 200m / 1000m | 512Mi / 2Gi |
+| Alertmanager | 50m / 200m | 64Mi / 256Mi |
+| Loki | 100m / 1000m | 256Mi / 1Gi |
+| Tempo | 100m / 500m | 256Mi / 1Gi |
+| Grafana | 100m / 500m | 128Mi / 512Mi |
+| Alloy (metrics) | 100m / 500m | 256Mi / 768Mi |
+| Alloy (logs) | 50m / 200m | 128Mi / 384Mi |
+| Alloy (receiver) | 50m / 250m | 64Mi / 256Mi |
+| Alloy (singleton) | 25m / 100m | 32Mi / 128Mi |
+| Cert-Manager | 10m / — | 32Mi / — |
+
+## Data Retention
+
+| Store | Retention |
 |---|---|
-| `prometheus` | Prometheus, Alertmanager, Prometheus Operator, node-exporter, kube-state-metrics |
-| `loki` | Loki (single binary mode) |
-| `tempo` | Tempo |
-| `alloy` | Grafana Alloy (metrics, logs, singleton, receiver) |
-| `grafana` | Grafana |
-| `cert-manager` | Cert-Manager, ClusterIssuer |
-| `metallb-system` | MetalLB (controller + speaker) |
-| `newt` | Pangolin Newt |
-| `kube-system` | Traefik, Flannel, core Kubernetes components |
+| Prometheus | 15 days |
+| Loki | 30 days |
+| Tempo | Default (configurable) |
+
+## Persistent Storage Volumes
+
+| Component | Size | StorageClass |
+|---|---|---|
+| Prometheus | 20Gi | Longhorn |
+| Alertmanager | 2Gi | Longhorn |
+| Loki | 10Gi | Longhorn |
+| Tempo | 10Gi | Longhorn |
+| Grafana | 5Gi | Longhorn |

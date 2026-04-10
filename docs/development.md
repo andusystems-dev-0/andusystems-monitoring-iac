@@ -1,225 +1,257 @@
-# Development Guide
+# Development & Deployment Guide
 
 ## Prerequisites
 
 | Tool | Purpose | Install |
 |---|---|---|
-| **Ansible** | Orchestration and configuration management | [docs.ansible.com](https://docs.ansible.com/ansible/latest/installation_guide/) |
-| **Terraform** | Infrastructure provisioning (Proxmox VMs, Helm releases) | [terraform.io](https://developer.hashicorp.com/terraform/install) |
-| **kubectl** | Kubernetes CLI | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
-| **Helm 3** | Kubernetes package manager | [helm.sh](https://helm.sh/docs/intro/install/) |
-| **SSH key pair** | Node access | `ssh-keygen` |
-| **Access to Proxmox** | VM hypervisor | Requires API token |
+| **Terraform** | VM provisioning on Proxmox | [terraform.io](https://www.terraform.io/downloads) |
+| **Ansible** | Cluster bootstrapping and app deployment | `pip install ansible` |
+| **kubectl** | Kubernetes cluster interaction | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
+| **Helm** (optional) | Chart inspection/debugging | [helm.sh](https://helm.sh/docs/intro/install/) |
+| **SSH access** | Connectivity to cluster nodes | SSH key configured in vault |
 
-## Local Setup
+### Ansible Dependencies
 
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd andusystems-monitoring
-```
-
-### 2. Install Ansible Dependencies
+Install the required Ansible collection:
 
 ```bash
-ansible-galaxy collection install -r ansible/requirements.yml
+ansible-galaxy install -r ansible/requirements.yml
 ```
 
-This installs the `kubernetes.core` collection required for Kubernetes resource management from Ansible.
+This installs the `kubernetes.core` collection used by all application roles.
 
-### 3. Configure Ansible Vault
+### Terraform Variables
+
+Each Terraform layer requires a `terraform.tfvars` file (gitignored). See the `variables.tf` in each layer for required values:
+
+- `terraform/layers/layer-1-infrastructure/` — Proxmox API credentials, node assignments, VM specs, network config
+- `terraform/layers/layer-2-helmapps/` — Kubeconfig path for Helm provider
+
+### Ansible Vault
+
+All secrets are encrypted with Ansible Vault. The vault password is required for any deployment operation. A reference template is available at:
+
+```
+ansible/inventory/monitoring/group_vars/all/vault.example
+```
+
+## Deployment
+
+### Full Redeployment
+
+Tears down and rebuilds the entire stack (VMs, Kubernetes, and all applications):
 
 ```bash
-cp ansible/inventory/monitoring/group_vars/all/vault.example \
-   ansible/inventory/monitoring/group_vars/all/vault
+./scripts/redeploy.sh
 ```
 
-Edit the vault file and populate all required secrets. Encrypt it with:
+This runs the master playbook `ansible/configurations/monitoring.yml` with all tags: `vms`, `kubernetes`, `apps`, `install`. Requires sudo password (`-K` flag).
+
+### Layer-by-Layer Deployment
+
+#### 1. Provision VMs
 
 ```bash
-ansible-vault encrypt ansible/inventory/monitoring/group_vars/all/vault
+./scripts/vms.sh
 ```
 
-### 4. Verify Inventory
+Runs Terraform to create/recreate VMs on Proxmox, then configures SSH access (host keys, authorized keys). Requires sudo password.
 
-Review `ansible/inventory/monitoring/hosts.yml` to ensure host definitions match your environment. The inventory defines controller and worker nodes with IP addresses sourced from vault variables.
+**What it does:**
+1. Destroys existing Terraform state (clean slate)
+2. Applies Terraform to provision VMs with Ubuntu cloud images
+3. Updates `/etc/hosts` with new VM IPs
+4. Configures SSH known hosts and key-based authentication
 
-### 5. Fetch Kubeconfig
-
-After the cluster is provisioned, the kubeconfig is stored at the repository root. Set your context:
+#### 2. Bootstrap Kubernetes
 
 ```bash
-export KUBECONFIG=$(pwd)/kubeconfig
-kubectl get nodes
+./scripts/kubernetes.sh
 ```
+
+Installs and configures Kubernetes on all provisioned VMs.
+
+**What it does:**
+1. Configures system prerequisites (swap disabled, kernel modules, sysctl)
+2. Installs containerd with SystemdCgroup
+3. Installs kubeadm, kubelet, kubectl (version-pinned)
+4. Initializes the control plane with the configured pod CIDR
+5. Deploys Flannel CNI
+6. Joins worker nodes to the cluster
+7. Fetches kubeconfig to the repository root
+
+#### 3. Deploy Applications
+
+```bash
+./scripts/apps.sh
+```
+
+Deploys all monitoring stack applications in the correct order. Requires sudo password.
+
+**Deployment order:**
+1. MetalLB (load balancer)
+2. Cert-Manager (TLS certificates)
+3. Pangolin-Newt (VPN tunnel)
+4. kube-prometheus-stack (Prometheus + Alertmanager + exporters)
+5. Loki (log aggregation)
+6. Tempo (distributed tracing)
+7. Alloy (telemetry collector)
+8. Homepage (dashboard)
+9. Grafana (visualization)
+
+### ArgoCD
+
+```bash
+./scripts/argocd.sh
+```
+
+Installs a cluster-local ArgoCD instance (managed by the central ArgoCD on the management cluster for ongoing GitOps reconciliation).
+
+## Project Layout
+
+### Ansible Structure
+
+```
+ansible/
+├── ansible.cfg                           # Ansible configuration
+├── requirements.yml                      # Galaxy dependencies
+├── inventory/monitoring/
+│   ├── hosts.yml                         # Node definitions and groups
+│   └── group_vars/all/
+│       ├── vars.yml                      # Variable definitions (references vault)
+│       └── vault.example                 # Vault template
+└── configurations/
+    ├── monitoring.yml                    # Master orchestration (imports all)
+    ├── apps.yml                          # App deployment orchestration
+    ├── cert-manager.yml                  # Cert-manager playbook
+    ├── grafana.yml                       # Grafana playbook
+    ├── homepage.yml                      # Homepage playbook
+    ├── pangolin-newt.yml                 # VPN client playbook
+    └── roles/
+        ├── vms.yml                       # VM provisioning role entry
+        ├── vms/tasks/{main,install}.yml
+        ├── kubernetes.yml                # K8s bootstrap role entry
+        ├── kubernetes/tasks/{main,install}.yml
+        ├── metallb.yml
+        ├── metallb/tasks/{main,install}.yml
+        ├── kube-prometheus-stack.yml
+        ├── kube-prometheus-stack/tasks/{main,install}.yml
+        ├── loki.yml
+        ├── loki/tasks/{main,install}.yml
+        ├── tempo.yml
+        ├── tempo/tasks/{main,install}.yml
+        ├── alloy.yml
+        ├── alloy/tasks/{main,install}.yml
+        ├── grafana/tasks/{main,install}.yml
+        ├── homepage/tasks/{main,install}.yml
+        ├── cert-manager/tasks/{main,install}.yml
+        └── pangolin-newt/tasks/{main,install}.yml
+```
+
+### Application Manifests
+
+Each application under `apps/` typically contains:
+
+- **`values.yml`** — Helm chart values (resource limits, storage, feature flags)
+- **`manifest.yml`** — Kubernetes resources applied directly (IngressRoutes, Secrets, Certificates, CRDs)
+
+### Terraform Layers
+
+| Layer | Path | Purpose |
+|---|---|---|
+| Layer 1 | `terraform/layers/layer-1-infrastructure/` | Proxmox VM provisioning |
+| Layer 2 | `terraform/layers/layer-2-helmapps/` | MetalLB Helm chart installation |
+
+## Modifying Components
+
+### Updating Helm Values
+
+Edit the `values.yml` for the target component under `apps/<component>/`. Then redeploy:
+
+```bash
+# Redeploy all apps
+./scripts/apps.sh
+
+# Or target a specific component via Ansible tags
+ansible-playbook -i ansible/inventory/monitoring \
+  ansible/configurations/apps.yml \
+  --tags <component>,install
+```
+
+### Adding a New Application
+
+1. Create a directory under `apps/<new-app>/` with `values.yml` and optionally `manifest.yml`
+2. Create an Ansible role under `ansible/configurations/roles/<new-app>/` with `tasks/main.yml` and `tasks/install.yml`
+3. Add the role import to `ansible/configurations/apps.yml`
+4. If the app needs a namespace, create it in the install task
+5. If the app needs secrets, add vault variables and create the Kubernetes secret in the install task
+
+### Changing Kubernetes Version
+
+The Kubernetes version is controlled by a vault variable. Update it there, then re-run:
+
+```bash
+./scripts/kubernetes.sh
+```
+
+This will reset and reinitialize the cluster with the new version.
+
+### Modifying VM Resources
+
+Edit the Terraform variables in `terraform/layers/layer-1-infrastructure/terraform.tfvars`, then:
+
+```bash
+./scripts/vms.sh
+```
+
+Note: This destroys and recreates all VMs (clean-slate approach).
 
 ## Environment Variables
 
-All sensitive configuration is managed through Ansible Vault. The following variables must be defined:
+All configuration is managed through Ansible Vault rather than environment variables. The vault file contains values for:
 
-### SSH & Node Access
-
-| Variable | Description |
+| Category | Examples |
 |---|---|
-| `ssh_user` | SSH username for cluster nodes |
-| `ssh_key_path` | Path to SSH private key |
-
-### Kubernetes
-
-| Variable | Description |
-|---|---|
-| `kubernetes_version` | Target Kubernetes version for kubeadm |
-| `pod_network_cidr` | CIDR for Flannel pod networking |
-
-### Infrastructure
-
-| Variable | Description |
-|---|---|
-| `proxmox_api_token_id` | Proxmox API token ID |
-| `proxmox_api_token_secret` | Proxmox API token secret |
-| `control_plane_ip` | IP address for the control plane node |
-| `worker_ips` | List of worker node IP addresses |
-| `metallb_ip_range` | IP range for MetalLB load balancer pool |
-
-### TLS / DNS
-
-| Variable | Description |
-|---|---|
-| `cloudflare_api_token` | CloudFlare API token for DNS-01 challenges |
-| `letsencrypt_email` | Email for Let's Encrypt certificate registration |
-
-### Observability Stack
-
-| Variable | Description |
-|---|---|
-| `grafana_admin_user` | Grafana admin username |
-| `grafana_admin_password` | Grafana admin password |
-| `grafana_oidc_client_secret` | Keycloak OIDC client secret for Grafana |
-| `minio_root_user` | MinIO access key (S3 backend for Loki/Tempo) |
-| `minio_root_password` | MinIO secret key |
-
-### Tunnel
-
-| Variable | Description |
-|---|---|
-| `pangolin_endpoint` | Pangolin Newt endpoint |
-| `pangolin_id` | Pangolin Newt client ID |
-| `pangolin_secret` | Pangolin Newt client secret |
-
-## Deployment Commands
-
-### Full Stack Deployment
-
-Provisions VMs, bootstraps Kubernetes, and deploys all applications:
-
-```bash
-ansible-playbook ansible/configurations/monitoring.yml \
-  -i ansible/inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-```
-
-### Application-Only Deployment
-
-Deploys all Helm applications (assumes cluster is already running):
-
-```bash
-ansible-playbook ansible/configurations/apps.yml \
-  -i ansible/inventory/monitoring/hosts.yml \
-  --ask-vault-pass
-```
-
-### Individual Component Deployment
-
-Each component can be deployed independently:
-
-```bash
-# Cert-Manager
-ansible-playbook ansible/configurations/cert-manager.yml \
-  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
-
-# Grafana
-ansible-playbook ansible/configurations/grafana.yml \
-  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
-
-# Homepage
-ansible-playbook ansible/configurations/homepage.yml \
-  -i ansible/inventory/monitoring/hosts.yml --ask-vault-pass
-```
-
-For roles that are included in `apps.yml` but don't have standalone playbooks (e.g., Loki, Tempo, Alloy), use tags:
-
-```bash
-ansible-playbook ansible/configurations/apps.yml \
-  -i ansible/inventory/monitoring/hosts.yml \
-  --ask-vault-pass \
-  --tags apps
-```
-
-## Deployment Order
-
-Components must be deployed in this order (handled automatically by `monitoring.yml`):
-
-1. **VMs** — Proxmox VM provisioning via Terraform
-2. **Kubernetes** — kubeadm cluster bootstrap with Flannel CNI
-3. **MetalLB** — Load balancer (required by Traefik)
-4. **Cert-Manager** — TLS certificates (required by IngressRoutes)
-5. **Pangolin Newt** — Tunnel agent
-6. **Kube-Prometheus-Stack** — Prometheus, Alertmanager, CRDs
-7. **Loki** — Log aggregation
-8. **Tempo** — Distributed tracing
-9. **Alloy** — Unified telemetry collector
-10. **Homepage** — Dashboard portal
-11. **Grafana** — Visualization (depends on all datasource backends being available)
-
-## Modifying Helm Values
-
-Application Helm values are stored in `apps/<component>/values.yml`. After modifying values:
-
-1. Edit the values file
-2. Re-run the component's Ansible playbook or the full `apps.yml` playbook
-3. Terraform will detect the change and update the Helm release
-
-### Key Files to Edit
-
-| What to Change | File |
-|---|---|
-| Alloy collector config, destinations, resource limits | `apps/alloy/values.yml` |
-| Cert-Manager replicas, DNS resolvers | `apps/cert-manager/values.yml` |
-| Grafana datasources, OIDC config, dashboards | `apps/grafana/values.yml` |
-| Homepage layout, services, bookmarks | `apps/homepage/values.yml` |
-| Loki retention, storage, ingestion limits | `apps/loki/values.yml` |
-| Longhorn replica count, storage settings | `apps/longhorn/manifest.yml` |
-| Prometheus retention, storage, scrape config | `apps/prometheus/values.yml` (via Terraform) |
-| Tempo storage, OTLP receivers | `apps/tempo/values.yml` (via Terraform) |
-
-## Adding a New Monitored Cluster
-
-To add a new remote cluster's observability data to Grafana:
-
-1. Deploy the LGTM stack on the remote cluster
-2. Ensure the remote Prometheus, Loki, and Tempo endpoints are reachable from the monitoring cluster
-3. Add new datasource entries in `apps/grafana/values.yml` under the `datasources` section
-4. Re-deploy Grafana
-
-## Ansible Configuration
-
-The Ansible configuration (`ansible/ansible.cfg`) is set up for this project's inventory structure. Key settings:
-
-- Inventory path: `ansible/inventory/monitoring/hosts.yml`
-- Vault file: `ansible/inventory/monitoring/group_vars/all/vault`
-- SSH configuration: retry interval and connection timeout defined in vault variables
+| **SSH/Network** | SSH user, key path, node IPs, pod CIDR |
+| **Kubernetes** | K8s version, kubeconfig path |
+| **Cloud** | Cloudflare API token, Proxmox credentials |
+| **Storage** | MinIO credentials |
+| **Applications** | Grafana admin creds, OIDC client secret, Let's Encrypt email |
+| **VPN** | Pangolin endpoint, Newt ID and secret |
+| **Network** | MetalLB IP range |
 
 ## Troubleshooting
 
-### Common Issues
+### SSH Connectivity
 
-**Terraform state conflicts**: The VMs and Helm roles run `terraform destroy` before `terraform apply`. If state is corrupted, manually clean up Terraform state files.
+If Ansible cannot reach nodes after VM provisioning, the VM role automatically handles SSH key scanning and distribution. If issues persist, check:
 
-**Cert-Manager CRD race condition**: The kube-prometheus-stack and cert-manager roles wait for CRDs to be registered. If deployment fails with "CRD not found", re-run the playbook — CRD registration can take a few seconds.
+- VM IPs match inventory
+- SSH key is correctly configured in vault
+- `/etc/hosts` on the Ansible controller has the correct entries
 
-**Alloy OOMKilled**: If Alloy pods are evicted due to memory limits, increase resource limits in `apps/alloy/values.yml` under the relevant Alloy sub-component (`alloy-metrics`, `alloy-logs`, `alloy-singleton`, `alloy-receiver`).
+### Helm Deployment Failures
 
-**Grafana OIDC login issues**: Ensure the Keycloak realm and client are configured correctly. The `grafana_oidc_client_secret` in vault must match the Keycloak client secret. Check `apps/grafana/values.yml` for the OAuth configuration.
+Application roles apply Helm charts via `kubernetes.core.helm`. If a deployment fails:
 
-**Worker node join failures**: The Kubernetes role retries worker joins with `--ignore-preflight-errors`. If a node still fails to join, SSH into the node and check `journalctl -u kubelet` for details.
+1. Check the Ansible output for the specific error
+2. Verify CRDs are installed (Prometheus Operator and cert-manager CRDs are installed before their charts)
+3. Check namespace exists
+4. Verify secrets are created (MinIO creds for Loki/Tempo, Grafana OIDC secret)
+
+### Storage Issues
+
+Longhorn must be healthy before deploying stateful applications. Verify:
+
+```bash
+kubectl get nodes   # All nodes should be Ready
+kubectl -n longhorn-system get pods   # All Longhorn pods should be Running
+```
+
+### CRD Ordering
+
+Some components require CRDs to be registered before Helm charts are applied:
+
+- **cert-manager**: CRDs installed from GitHub release before chart
+- **kube-prometheus-stack**: Prometheus Operator CRDs installed before chart
+- **MetalLB**: Deployed via Terraform Helm before IPAddressPool/L2Advertisement resources
