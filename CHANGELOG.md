@@ -9,28 +9,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2026-04-05]
 
 ### Fixed
-- Bumped Alloy resource limits to resolve OOMKilled crashes
+- Bumped Alloy resource limits to fix OOMKilled pod restarts
 
 ## [2026-03-23]
 
 ### Fixed
-- Grafana values updated to fix Keycloak login issues
-- Grafana values updated to auto-redirect to Keycloak login
-- Grafana values configured for Keycloak SSO integration
+- Grafana values updated to fix login issues temporarily
+- Grafana auto-redirect to Keycloak login configured
+- Grafana Keycloak OIDC login integration added
+- Traefik CRD installation added to monitoring cluster
+
+### Changed
+- Grafana values updated for correct load balancer IPs for networking cluster datasources
 - Various small fixes across configurations
-- Added `installCRDs` to monitoring Traefik values
-- Fixed Grafana datasource load balancer IPs for networking cluster
 
 ## [2026-03-17]
 
 ### Added
-- Ansible deployment roles for LGTM stack (Loki, Grafana, Tempo, Metrics)
-- Grafana dashboards and datasource configurations
-- Centralized MinIO for Loki/Tempo object storage (removed per-cluster MinIO deployment)
+- Ansible deployment of LGTM (Loki, Grafana, Tempo, Metrics) stack
+- Grafana dashboards and datasource provisioning
+- Grafana values with pre-configured dashboards and multi-cluster datasources
+
+### Changed
+- Updated Grafana values for correct load balancer IPs on datasources
+- Removed MinIO deployment from monitoring cluster in favor of centralized MinIO on storage cluster
 
 ### Fixed
-- Grafana values corrected for load balancer IPs on datasources
-- Various fixes for LGTM stack integration issues
+- Fixes to the LGTM stack configuration and connectivity
 
 ## [2026-03-15]
 
@@ -41,59 +46,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2026-03-14]
 
 ### Added
-- Homepage service entries for networking repository
-- New services added to Homepage dashboard
+- Homepage values with infrastructure services and links
+- Networking repository link added to Homepage
 
 ### Changed
-- Full deployment commit for monitoring cluster (2026-03-14)
+- Homepage values updated with new services and correct formatting
+- Homepage widget sizing adjusted
+- Pi-hole homepage link updated to use DNS name
 
 ### Fixed
-- Homepage values formatting corrections
-- Homepage widget sizing
-- Keycloak link on Homepage
-- Homepage values updates
-- Pi-hole link updated to use DNS name
+- Keycloak link on Homepage corrected
 
 ## [2026-03-10]
 
 ### Added
-- Initial monitoring cluster commit with base infrastructure
+- Initial project structure and configuration
 
 ## [2026-03-09]
 
+### Added
+- Homepage dashboard with service links and bookmarks
+- ArgoCD configuration and values
+
 ### Fixed
-- ArgoCD values file corrections and proper labeling
-- ArgoCD icon updated
-- Homepage links configured to open in new tab
-- Updated `.gitignore` to include [AI_ASSISTANT] files
+- ArgoCD values file formatting and labeling
+- Homepage links configured to open in new tabs
+- ArgoCD icon on Homepage
+
+### Changed
+- Gitignore updated to exclude [AI_ASSISTANT] workspace files
 
 ## [2026-03-08]
 
 ### Added
-- Longhorn deployment to the monitoring cluster
-- Proxmox credentials to Ansible configuration
+- Longhorn storage deployment to monitoring cluster
+- Proxmox credentials added to Ansible configuration
+- Homepage dashboard initial deployment
 
 ### Changed
-- Homepage configuration updates
-- Application values updated for Longhorn storage
-- GitHub bookmarks updated in Homepage to reflect correct VLAN naming
+- Application values updated for Longhorn storage integration
+- Homepage configuration refined with correct service entries
+- GitHub bookmarks updated to reflect correct naming
 
-### Fixed
-- Removed stale Prometheus and Loki entries from Homepage monitoring services
-- Fixed path in `argocd.sh` script
+### Removed
+- Prometheus and Loki entries from monitoring services in Homepage (moved to dedicated section)
 
 ## [2026-03-07]
 
-### Added
-- Grafana deployment and Helm chart configuration
-- Grafana values and manifest files
-
 ### Changed
 - Loki values updated
-- Homepage values updated
-
-## [2026-03-06]
-
-### Added
-- Initial manifests and DNS configuration
-- Traefik IngressRoute manifests for monitoring services
