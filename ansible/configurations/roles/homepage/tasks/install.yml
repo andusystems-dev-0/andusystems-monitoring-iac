@@ -1,6 +1,4 @@
-- name: Apply Manifest
-  kubernetes.core.k8s:
-    state: present
-    definition: "{{ lookup('template', repo_root + '/apps/homepage/manifest.yml') | from_yaml_all | list }}"
-  environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+# Note: apps/homepage/manifest.yml is applied by ArgoCD via the
+# monitoring-homepage Application in andusystems-management. The manifest
+# contains no Jinja2 templating, so Ansible does not need to render it
+# and applying it here would race against Traefik's CRD installation.
