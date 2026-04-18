@@ -38,7 +38,7 @@ persistence:
 # values.yml - inline config directly in Helm values
 config:
   settings:
-    title: Andu Systems
+    title: Andusystems
     theme: dark
     color: slate
     headerStyle: clean
@@ -112,12 +112,6 @@ config:
             href: https://pangolin.andusystems.com/andusystems/settings/resources/client
             icon: pangolin.png
             description: Tunnel & reverse proxy
-        
-    - Security:
-        - Keycloak:
-            href: https://keycloak.andusystems.com/admin/master/console/
-            icon: keycloak.png
-            description: Identity & SSO
 
     - Monitoring & Observability:
         - Grafana:
@@ -129,26 +123,10 @@ config:
         - Forgejo:
             href: https://forgejo.andusystems.com/
             icon: forgejo.png
-            description: GitOps CI
+        - Github:
+            href: https://github.com/andusystems-dev-0
+            icon: github.png
         - ArgoCD:
             href: https://argocd.andusystems.com/applications
             icon: argo-cd.png
             description: GitOps CD
-
-  bookmarks:
-    - Developer:
-        - GitHub - VLAN 10 - Management Repo:
-            - href: https://github.com/dts-dev-0/andusystems-management
-              icon: github.png
-        - GitHub - VLAN 30 - Networking:
-            - href: https://github.com/dts-dev-0/andusystems-networking
-              icon: github.png
-        - GitHub - VLAN 40 - Storage Repo:
-            - href: https://github.com/dts-dev-0/andusystems-storage
-              icon: github.png
-        - GitHub - VLAN 50 - Monitoring Repo:
-            - href: https://github.com/dts-dev-0/andusystems-monitoring
-              icon: github.png
-        - GitHub - VLAN 60 - FleetDock:
-            - href: https://github.com/dts-dev-0/andusystems-fleetdock
-              icon: github.png
