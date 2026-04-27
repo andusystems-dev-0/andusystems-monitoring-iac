@@ -1,97 +1,49 @@
 # Changelog
 
-All notable changes to the andusystems-monitoring repository are documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [2026-04-05]
-
-### Fixed
-- Bumped Alloy resource limits to fix OOMKilled pod restarts
-
-## [2026-03-23]
-
-### Fixed
-- Grafana values updated to fix login issues temporarily
-- Grafana auto-redirect to Keycloak login configured
-- Grafana Keycloak OIDC login integration added
-- Traefik CRD installation added to monitoring cluster
-
-### Changed
-- Grafana values updated for correct load balancer IPs for networking cluster datasources
-- Various small fixes across configurations
-
-## [2026-03-17]
+## [2025-04-26]
 
 ### Added
-- Ansible deployment of LGTM (Loki, Grafana, Tempo, Metrics) stack
-- Grafana dashboards and datasource provisioning
-- Grafana values with pre-configured dashboards and multi-cluster datasources
+- `apps/cluster-status/manifest.yml` — lightweight nginx health-check endpoint exposed via
+  Traefik, used by ArgoCD and Homepage portfolio to probe cluster availability.
 
 ### Changed
-- Updated Grafana values for correct load balancer IPs on datasources
-- Removed MinIO deployment from monitoring cluster in favor of centralized MinIO on storage cluster
+- Bumped Alloy resource limits (CPU and memory) across all four sub-charts to prevent
+  OOMKilled restarts under load.
+- Updated Grafana Helm values to resolve login issues; temporarily adjusted OAuth settings
+  while Keycloak OIDC configuration was stabilised.
+- Updated Grafana Helm values to auto-redirect users to the Keycloak login page instead of
+  showing the Grafana native login form.
+- Updated Grafana Helm values for full Keycloak OIDC integration including role mapping.
+- Fixed Grafana Helm values to use the correct LoadBalancer IPs for the networking cluster
+  datasources.
+- Updated Grafana datasource URLs and dashboard configuration (node-exporter-full gnetId
+  1860); removed dedicated MinIO deployment in favour of a centralised MinIO instance.
+- Iterative fixes to Loki, Tempo, Alloy, and Grafana stack deployment issues.
 
-### Fixed
-- Fixes to the LGTM stack configuration and connectivity
+### Added (earlier 2025)
+- Full Ansible deployment of the LGTM stack (Grafana, Loki, Tempo, Alloy) via roles and
+  Helm values files.
+- Pushed initial Grafana values files and ArgoCD-based deployment wiring.
+- Added MetalLB to the monitoring cluster (Terraform layer-2 module + Ansible role).
+- Iterative Homepage dashboard updates: services, bookmarks, widgets, link targets.
+- Added `installCRDs` to the monitoring cluster Traefik values.
 
-## [2026-03-15]
-
-### Added
-- Grafana Helm values files
-- MetalLB deployment to monitoring cluster
-
-## [2026-03-14]
-
-### Added
-- Homepage values with infrastructure services and links
-- Networking repository link added to Homepage
-
-### Changed
-- Homepage values updated with new services and correct formatting
-- Homepage widget sizing adjusted
-- Pi-hole homepage link updated to use DNS name
-
-### Fixed
-- Keycloak link on Homepage corrected
-
-## [2026-03-10]
+## [2025-03-14]
 
 ### Added
-- Initial project structure and configuration
-
-## [2026-03-09]
-
-### Added
-- Homepage dashboard with service links and bookmarks
-- ArgoCD configuration and values
-
-### Fixed
-- ArgoCD values file formatting and labeling
-- Homepage links configured to open in new tabs
-- ArgoCD icon on Homepage
-
-### Changed
-- Gitignore updated to exclude [AI_ASSISTANT] workspace files
-
-## [2026-03-08]
-
-### Added
-- Longhorn storage deployment to monitoring cluster
-- Proxmox credentials added to Ansible configuration
-- Homepage dashboard initial deployment
-
-### Changed
-- Application values updated for Longhorn storage integration
-- Homepage configuration refined with correct service entries
-- GitHub bookmarks updated to reflect correct naming
-
-### Removed
-- Prometheus and Loki entries from monitoring services in Homepage (moved to dedicated section)
-
-## [2026-03-07]
-
-### Changed
-- Loki values updated
+- Initial comprehensive commit: Kubernetes cluster bootstrap (kubeadm, Flannel CNI),
+  Ansible roles for all components, Terraform integration for VM provisioning.
+- Homepage dashboard with infrastructure, networking, security, monitoring, and CI/CD
+  service groups.
+- cert-manager with Let's Encrypt DNS-01 via Cloudflare.
+- Pangolin/Newt VPN client deployment.
+- kube-prometheus-stack, Loki, Tempo, and Alloy initial configuration.
+- Grafana with multi-cluster datasources (management, storage, networking, fleetdock).
+- Ansible inventory and vault structure.
+- `.gitignore` and `.gitattributes` baseline.
