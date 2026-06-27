@@ -88,8 +88,8 @@ config:
             widget:
               type: proxmox
               url: https://10.238.0.101:8006/
-              username: "terraform@pam!terraform"
-              password: "fa19f9d6-be8f-4e15-b9f3-8bd3b489e1fc"
+              username: "LEAKED USER"
+              password: "LEAKED TOKEN"
         - Proxmox Backup Server:
             href: https://10.238.0.106:8007/
             icon: proxmox.png
